@@ -6,6 +6,9 @@ from functools import partial
 from multiprocessing import Process, Pipe
 import time
 
+# For backwards compatibility with older versions of hyperopt.fmin
+import inspect
+
 import numpy as np
 
 import hyperopt
@@ -263,6 +266,11 @@ class hyperopt_estimator(object):
         else:
             self.rstate = np.random.RandomState()
 
+        # Backwards compatibility with older version of hyperopt
+        self.seed = seed
+        if 'rstate' not in inspect.getargspec(hyperopt.fmin).args:
+            print("Warning: Using older version of hyperopt.fmin")
+
     def info(self, *args):
         if self.verbose:
             print ' '.join(map(str, args))
@@ -341,17 +349,36 @@ class hyperopt_estimator(object):
             new_increment = yield self.trials
             if new_increment is not None:
                 increment = new_increment
-            hyperopt.fmin(fn_with_timeout,
-                          space=self.space,
-                          algo=self.algo,
-                          trials=self.trials,
-                          max_evals=len(self.trials.trials) + increment,
-                          rstate=self.rstate,
-                          # -- let exceptions crash the program,
-                          #    so we notice them.
-                          catch_eval_exceptions=False,
-                          return_argmin=False, # -- in case no success so far
-                         )
+            #FIXME: temporary workaround for rstate issue #35
+            #       latest hyperopt.fmin() on master does not match PyPI
+            if 'rstate' in inspect.getargspec(hyperopt.fmin).args:
+                hyperopt.fmin(fn_with_timeout,
+                              space=self.space,
+                              algo=self.algo,
+                              trials=self.trials,
+                              max_evals=len(self.trials.trials) + increment,
+                              rstate=self.rstate,
+                              # -- let exceptions crash the program,
+                              #    so we notice them.
+                              catch_eval_exceptions=False,
+                              return_argmin=False, # -- in case no success so far
+                             )
+            else:
+                if self.seed is None:
+                    hyperopt.fmin(fn_with_timeout,
+                                  space=self.space,
+                                  algo=self.algo,
+                                  trials=self.trials,
+                                  max_evals=len(self.trials.trials) + increment,
+                                 )
+                else:
+                    hyperopt.fmin(fn_with_timeout,
+                                  space=self.space,
+                                  algo=self.algo,
+                                  trials=self.trials,
+                                  max_evals=len(self.trials.trials) + increment,
+                                  rseed=self.seed,
+                                 )
 
     def retrain_best_model_on_full_data(self, X, y, weights=None):
         for pp_algo in self._best_preprocs:
